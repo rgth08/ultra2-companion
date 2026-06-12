@@ -10,18 +10,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.UUID
 
-/**
- * Manages BLE connection to the Ultra2 / LS7076 watch.
- *
- * Services used (confirmed via nRF Connect scan):
- *   NUS  : 6e400801-b5a3-f393-e0a9-e50e24dcca9d  (Nordic UART)
- *   FFFF : 0000ffff-0000-1000-8000-00805f9b34fb  (FitPro commands)
- *   3802 : 00003802-0000-1000-8000-00805f9b34fb  (secondary data)
- */
 @SuppressLint("MissingPermission")
 class BleManager(private val context: Context) {
 
-    // ── UUIDs ──────────────────────────────────────────────────────────────
     companion object {
         val NUS_SERVICE  = UUID.fromString("6e400801-b5a3-f393-e0a9-e50e24dcca9d")
         val NUS_WRITE    = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9d")
@@ -32,7 +23,6 @@ class BleManager(private val context: Context) {
         val SVC_3802     = UUID.fromString("00003802-0000-1000-8000-00805f9b34fb")
         val CHAR_4A02    = UUID.fromString("00004a02-0000-1000-8000-00805f9b34fb")
         val CCCD         = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
         val BATTERY_SVC  = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
         val BAT_LEVEL    = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
         val DEV_INFO_SVC = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb")
@@ -40,72 +30,133 @@ class BleManager(private val context: Context) {
         val MFR_NAME     = UUID.fromString("00002a29-0000-1000-8000-00805f9b34fb")
     }
 
-    // ── State ──────────────────────────────────────────────────────────────
-    private val _state = MutableStateFlow<BleState>(BleState.Disconnected)
+    private val _state    = MutableStateFlow<BleState>(BleState.Disconnected)
     val state: StateFlow<BleState> = _state
 
-    private val _log   = MutableSharedFlow<LogEntry>(extraBufferCapacity = 100)
+    private val _log      = MutableSharedFlow<LogEntry>(extraBufferCapacity = 200)
     val log: SharedFlow<LogEntry> = _log
 
-    private val _data  = MutableSharedFlow<WatchData>(extraBufferCapacity = 50)
+    private val _data     = MutableSharedFlow<WatchData>(extraBufferCapacity = 50)
     val data: SharedFlow<WatchData> = _data
 
-    private var gatt:      BluetoothGatt?           = null
+    // Scan results — UI can show these for selection
+    private val _scanResults = MutableStateFlow<List<ScanResult>>(emptyList())
+    val scanResults: StateFlow<List<ScanResult>> = _scanResults
+
+    private var gatt:      BluetoothGatt?               = null
     private var nusWrite:  BluetoothGattCharacteristic? = null
     private var ff22Write: BluetoothGattCharacteristic? = null
     private var char4a02:  BluetoothGattCharacteristic? = null
 
-    private val scope  = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope     = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val uiHandler = Handler(Looper.getMainLooper())
+    private val foundMacs = mutableSetOf<String>()
 
-    private val btAdapter: BluetoothAdapter? by lazy {
-        (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-    }
+    private val btManager  by lazy { context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager }
+    private val btAdapter  get() = btManager.adapter
 
-    // ── Scan ──────────────────────────────────────────────────────────────
+    // ── Scan — NO filter, shows ALL nearby BLE devices ────────────────────
     fun startScan() {
-        val scanner = btAdapter?.bluetoothLeScanner ?: run {
-            emitLog(LogEntry.Error("Bluetooth no disponible")); return
+        val adapter = btAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            emitLog(LogEntry.Error("Bluetooth desactivado. Actívalo primero."))
+            _state.value = BleState.Disconnected
+            return
         }
-        _state.value = BleState.Scanning
-        emitLog(LogEntry.Event("Escaneando... buscando ULTRA2"))
 
-        val filters = listOf(
-            ScanFilter.Builder().setDeviceName("ULTRA2").build(),
-            ScanFilter.Builder().setDeviceName("Ultra2").build(),
-        )
+        val scanner = adapter.bluetoothLeScanner
+        if (scanner == null) {
+            emitLog(LogEntry.Error("BLE scanner no disponible"))
+            return
+        }
+
+        foundMacs.clear()
+        _scanResults.value = emptyList()
+        _state.value = BleState.Scanning
+        emitLog(LogEntry.Event("Escaneando TODOS los dispositivos BLE (15s)..."))
+        emitLog(LogEntry.Event("Asegúrate que el reloj esté en MODO INTELIGENTE"))
+
+        // NO name filter — scan everything
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        scanner.startScan(filters, settings, scanCallback)
+        scanner.startScan(null, settings, scanCallback)
 
-        // Auto-stop scan after 15 seconds
         uiHandler.postDelayed({
             scanner.stopScan(scanCallback)
-            if (_state.value is BleState.Scanning) {
+            val results = _scanResults.value
+            if (results.isEmpty()) {
                 _state.value = BleState.Disconnected
-                emitLog(LogEntry.Error("Reloj no encontrado. ¿Está encendido y en modo inteligente?"))
+                emitLog(LogEntry.Error("No se encontraron dispositivos BLE. ¿Bluetooth activo? ¿Reloj encendido?"))
+            } else {
+                emitLog(LogEntry.Event("Scan terminado. ${results.size} dispositivo(s) encontrado(s)."))
+                // Auto-connect if Ultra2 found
+                val watch = results.firstOrNull {
+                    val name = it.device.name?.uppercase() ?: ""
+                    name.contains("ULTRA") || name.contains("LS7076") || name.contains("WATCH")
+                }
+                if (watch != null) {
+                    emitLog(LogEntry.Event("✓ Reloj detectado: ${watch.device.name} — conectando..."))
+                    connect(watch.device)
+                } else {
+                    _state.value = BleState.Disconnected
+                    emitLog(LogEntry.Event("Reloj no identificado automáticamente."))
+                    emitLog(LogEntry.Event("Dispositivos encontrados — toca 'Conectar' y elige el tuyo:"))
+                    results.take(10).forEachIndexed { i, r ->
+                        val name = r.device.name ?: "Sin nombre"
+                        val mac  = r.device.address
+                        val rssi = r.rssi
+                        emitLog(LogEntry.Event("  [$i] $name  $mac  ${rssi}dBm"))
+                    }
+                }
             }
         }, 15_000)
     }
 
+    // Connect directly to a MAC address (for manual selection)
+    fun connectByMac(mac: String) {
+        val adapter = btAdapter ?: run {
+            emitLog(LogEntry.Error("Bluetooth no disponible")); return
+        }
+        try {
+            val device = adapter.getRemoteDevice(mac)
+            emitLog(LogEntry.Event("Conectando a $mac..."))
+            connect(device)
+        } catch (e: Exception) {
+            emitLog(LogEntry.Error("MAC inválida: $mac"))
+        }
+    }
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            btAdapter?.bluetoothLeScanner?.stopScan(this)
-            emitLog(LogEntry.Event("Encontrado: ${result.device.name} [${result.device.address}]"))
-            connect(result.device)
+            val mac  = result.device.address
+            val name = result.device.name ?: "?"
+            if (foundMacs.add(mac)) {
+                // Log every NEW device found
+                emitLog(LogEntry.Event("BLE encontrado: \"$name\"  $mac  ${result.rssi}dBm"))
+                _scanResults.value = _scanResults.value + result
+            }
         }
         override fun onScanFailed(errorCode: Int) {
+            val msg = when (errorCode) {
+                1 -> "ALREADY_STARTED"
+                2 -> "APP_REGISTRATION_FAILED"
+                3 -> "INTERNAL_ERROR"
+                4 -> "FEATURE_UNSUPPORTED"
+                5 -> "OUT_OF_HARDWARE_RESOURCES"
+                6 -> "SCANNING_TOO_FREQUENTLY — espera 30s y reintenta"
+                else -> "código $errorCode"
+            }
             _state.value = BleState.Disconnected
-            emitLog(LogEntry.Error("Scan falló: código $errorCode"))
+            emitLog(LogEntry.Error("Scan falló: $msg"))
         }
     }
 
     // ── Connect ────────────────────────────────────────────────────────────
     private fun connect(device: BluetoothDevice) {
         _state.value = BleState.Connecting
-        emitLog(LogEntry.Event("Conectando GATT a ${device.address}..."))
+        emitLog(LogEntry.Event("Conectando GATT a ${device.name ?: device.address}..."))
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
@@ -128,8 +179,9 @@ class BleManager(private val context: Context) {
                     g.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
+                    if (status != 0) emitLog(LogEntry.Error("GATT desconectado (status=$status)"))
+                    else emitLog(LogEntry.Event("GATT desconectado"))
                     _state.value = BleState.Disconnected
-                    emitLog(LogEntry.Event("GATT desconectado"))
                     gatt?.close(); gatt = null
                 }
             }
@@ -139,75 +191,67 @@ class BleManager(private val context: Context) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 emitLog(LogEntry.Error("Service discovery falló: $status")); return
             }
-
-            emitLog(LogEntry.Event("Servicios descubiertos — suscribiendo..."))
+            emitLog(LogEntry.Event("Servicios descubiertos:"))
+            g.services.forEach { svc ->
+                emitLog(LogEntry.Event("  SVC: ${svc.uuid}"))
+            }
             scope.launch {
                 setupCharacteristics(g)
-                readDeviceInfo(g)
-
-                // ── THE KEY FIX ──────────────────────────────────────────
-                // Send PhoneType=Android immediately after connecting.
-                // This ensures Classic BT portable mode works correctly.
                 delay(500)
-                emitLog(LogEntry.Event("Enviando PhoneType=Android..."))
+                emitLog(LogEntry.Event("→ Enviando PhoneType=Android (fix modo portátil)..."))
                 sendPhoneTypeAndroid()
                 delay(300)
                 syncTime()
-                // ─────────────────────────────────────────────────────────
-
-                _state.value = BleState.Connected(g.device.name ?: "ULTRA2")
-                emitLog(LogEntry.Event("✓ Listo. Modo portátil Bluetooth arreglado."))
+                _state.value = BleState.Connected(g.device.name ?: g.device.address)
+                emitLog(LogEntry.Event("✓ Listo."))
             }
         }
 
         override fun onCharacteristicChanged(
-            g: BluetoothGatt,
-            char: BluetoothGattCharacteristic,
-            value: ByteArray
+            g: BluetoothGatt, char: BluetoothGattCharacteristic, value: ByteArray
         ) {
-            emitLog(LogEntry.Rx("${char.uuid.toString().take(8)}", value))
-            val parsed = FitProProtocol.parseNotification(value)
-            parsed?.let { scope.launch { _data.emit(it) } }
+            emitLog(LogEntry.Rx(char.uuid.toString().take(8), value))
+            FitProProtocol.parseNotification(value)?.let {
+                scope.launch { _data.emit(it) }
+            }
         }
 
-        // Legacy callback for Android < 13
         @Deprecated("Deprecated in API 33")
         override fun onCharacteristicChanged(g: BluetoothGatt, char: BluetoothGattCharacteristic) {
             onCharacteristicChanged(g, char, char.value ?: return)
         }
 
         override fun onCharacteristicWrite(
-            g: BluetoothGatt,
-            char: BluetoothGattCharacteristic,
-            status: Int
+            g: BluetoothGatt, char: BluetoothGattCharacteristic, status: Int
         ) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                emitLog(LogEntry.Error("Write falló en ${char.uuid.toString().take(8)}: $status"))
-            }
+            if (status != BluetoothGatt.GATT_SUCCESS)
+                emitLog(LogEntry.Error("Write falló (${char.uuid.toString().take(8)}): $status"))
         }
     }
 
     // ── Service setup ──────────────────────────────────────────────────────
     private suspend fun setupCharacteristics(g: BluetoothGatt) {
-        // NUS
         g.getService(NUS_SERVICE)?.let { svc ->
             nusWrite = svc.getCharacteristic(NUS_WRITE)
             svc.getCharacteristic(NUS_NOTIFY)?.let { enableNotify(g, it) }
             emitLog(LogEntry.Event("NUS service ✓"))
-        } ?: emitLog(LogEntry.Error("NUS service no encontrado"))
+        } ?: emitLog(LogEntry.Error("NUS no encontrado"))
 
-        // 0xFFFF
         g.getService(FFFF_SERVICE)?.let { svc ->
             ff22Write = svc.getCharacteristic(FF22_WRITE)
             svc.getCharacteristic(FF11_NOTIFY)?.let { enableNotify(g, it) }
             emitLog(LogEntry.Event("0xFFFF service ✓"))
-        } ?: emitLog(LogEntry.Error("0xFFFF service no encontrado"))
+        } ?: emitLog(LogEntry.Error("0xFFFF no encontrado"))
 
-        // 0x3802
         g.getService(SVC_3802)?.let { svc ->
             char4a02 = svc.getCharacteristic(CHAR_4A02)
             char4a02?.let { enableNotify(g, it) }
             emitLog(LogEntry.Event("0x3802 service ✓"))
+        }
+
+        // Read battery immediately
+        g.getService(BATTERY_SVC)?.getCharacteristic(BAT_LEVEL)?.let {
+            g.readCharacteristic(it)
         }
     }
 
@@ -216,94 +260,37 @@ class BleManager(private val context: Context) {
         char.getDescriptor(CCCD)?.let { desc ->
             desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
             g.writeDescriptor(desc)
-            delay(150) // give time between descriptor writes
+            delay(200)
         }
     }
 
-    private suspend fun readDeviceInfo(g: BluetoothGatt) {
-        g.getService(DEV_INFO_SVC)?.let { svc ->
-            val fw  = readStringChar(g, svc, FW_REV)  ?: "—"
-            val mfr = readStringChar(g, svc, MFR_NAME) ?: "—"
-            emitLog(LogEntry.Event("DevInfo → FW: $fw | Mfr: $mfr"))
-        }
-    }
-
-    private suspend fun readStringChar(
-        g: BluetoothGatt,
-        svc: BluetoothGattService,
-        uuid: UUID
-    ): String? {
-        val char = svc.getCharacteristic(uuid) ?: return null
-        return suspendCancellableCoroutine { cont ->
-            val cb = object : BluetoothGattCallback() {
-                override fun onCharacteristicRead(
-                    g: BluetoothGatt,
-                    c: BluetoothGattCharacteristic,
-                    value: ByteArray,
-                    status: Int
-                ) {
-                    if (c.uuid == uuid) cont.resume(String(value), null)
-                }
-            }
-            // We can just read synchronously with a coroutine delay here
-            g.readCharacteristic(char)
-            scope.launch { delay(300); cont.resume(null, null) }
-        }
-    }
-
-    // ── Public commands ────────────────────────────────────────────────────
-
+    // ── Commands ───────────────────────────────────────────────────────────
     fun sendPhoneTypeAndroid() {
         scope.launch {
-            FitProProtocol.phoneTypeAndroid().forEach { (channel, bytes) ->
-                writeToChannel(channel, bytes)
-                delay(300)
+            FitProProtocol.phoneTypeAndroid().forEach { (ch, b) ->
+                writeToChannel(ch, b); delay(300)
             }
         }
     }
 
     fun syncTime() {
         scope.launch {
-            FitProProtocol.syncTime().forEach { (channel, bytes) ->
-                writeToChannel(channel, bytes)
-                delay(200)
+            FitProProtocol.syncTime().forEach { (ch, b) ->
+                writeToChannel(ch, b); delay(200)
             }
         }
     }
 
-    fun startHeartRate() {
-        scope.launch {
-            FitProProtocol.startHeartRate().forEach { (c, b) -> writeToChannel(c, b) }
-        }
-    }
-
-    fun startECG() {
-        scope.launch {
-            FitProProtocol.startECG().forEach { (c, b) -> writeToChannel(c, b) }
-        }
-    }
-
-    fun stopECG() {
-        scope.launch {
-            FitProProtocol.stopECG().forEach { (c, b) -> writeToChannel(c, b) }
-        }
-    }
-
-    fun startSpO2() {
-        scope.launch {
-            FitProProtocol.startSpO2().forEach { (c, b) -> writeToChannel(c, b) }
-        }
-    }
-
-    fun enableContinuousHR() {
-        scope.launch {
-            FitProProtocol.enableContinuousHR().forEach { (c, b) -> writeToChannel(c, b) }
-        }
-    }
+    fun startHeartRate()    { scope.launch { FitProProtocol.startHeartRate().forEach   { (c,b) -> writeToChannel(c,b) } } }
+    fun startECG()          { scope.launch { FitProProtocol.startECG().forEach         { (c,b) -> writeToChannel(c,b) } } }
+    fun stopECG()           { scope.launch { FitProProtocol.stopECG().forEach          { (c,b) -> writeToChannel(c,b) } } }
+    fun startSpO2()         { scope.launch { FitProProtocol.startSpO2().forEach        { (c,b) -> writeToChannel(c,b) } } }
+    fun enableContinuousHR(){ scope.launch { FitProProtocol.enableContinuousHR().forEach { (c,b) -> writeToChannel(c,b) } } }
 
     fun sendRawHex(channel: String, hexString: String) {
         try {
             val bytes = hexString.trim().split("\\s+".toRegex())
+                .filter { it.isNotEmpty() }
                 .map { it.toInt(16).toByte() }.toByteArray()
             scope.launch { writeToChannel(channel, bytes) }
         } catch (e: Exception) {
@@ -311,7 +298,6 @@ class BleManager(private val context: Context) {
         }
     }
 
-    // ── Core write ─────────────────────────────────────────────────────────
     private fun writeToChannel(channel: String, bytes: ByteArray) {
         val char = when (channel) {
             FitProProtocol.CHANNEL_NUS  -> nusWrite
@@ -319,12 +305,10 @@ class BleManager(private val context: Context) {
             "3802"                       -> char4a02
             else                         -> ff22Write
         } ?: run {
-            emitLog(LogEntry.Error("Canal $channel no disponible"))
+            emitLog(LogEntry.Error("Canal $channel no disponible (¿reloj conectado?)"))
             return
         }
-
-        emitLog(LogEntry.Tx("→ $channel", bytes))
-
+        emitLog(LogEntry.Tx("→$channel", bytes))
         val g = gatt ?: return
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             g.writeCharacteristic(char, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
@@ -336,19 +320,12 @@ class BleManager(private val context: Context) {
         }
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────
-    private fun emitLog(entry: LogEntry) {
-        scope.launch { _log.emit(entry) }
-    }
+    private fun emitLog(entry: LogEntry) { scope.launch { _log.emit(entry) } }
 
-    fun dispose() {
-        scope.cancel()
-        disconnect()
-    }
+    fun dispose() { scope.cancel(); disconnect() }
 }
 
-// ── State & Log models ─────────────────────────────────────────────────────────
-
+// ── Models ─────────────────────────────────────────────────────────────────────
 sealed class BleState {
     object Disconnected                    : BleState()
     object Scanning                        : BleState()
@@ -357,8 +334,8 @@ sealed class BleState {
 }
 
 sealed class LogEntry {
-    data class Event(val msg: String)              : LogEntry()
-    data class Tx(val label: String, val bytes: ByteArray) : LogEntry()
-    data class Rx(val label: String, val bytes: ByteArray) : LogEntry()
-    data class Error(val msg: String)              : LogEntry()
+    data class Event(val msg: String)                           : LogEntry()
+    data class Tx(val label: String, val bytes: ByteArray)     : LogEntry()
+    data class Rx(val label: String, val bytes: ByteArray)     : LogEntry()
+    data class Error(val msg: String)                          : LogEntry()
 }

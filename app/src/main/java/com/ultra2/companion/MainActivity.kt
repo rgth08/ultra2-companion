@@ -21,7 +21,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var ble: BleManager
 
-    // ── Permissions ────────────────────────────────────────────────────────
     private val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         arrayOf(
             Manifest.permission.BLUETOOTH_SCAN,
@@ -38,11 +37,16 @@ class MainActivity : AppCompatActivity() {
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        if (grants.values.all { it }) ble.startScan()
-        else appendLog("ER", "Permisos Bluetooth denegados")
+        val denied = grants.filter { !it.value }.keys
+        if (denied.isEmpty()) {
+            appendLog("SYS", "Permisos concedidos ✓")
+            ble.startScan()
+        } else {
+            appendLog("ERR", "Permisos denegados: $denied")
+            appendLog("ERR", "Ve a Ajustes > Apps > Ultra2 > Permisos y activa Bluetooth")
+        }
     }
 
-    // ── Lifecycle ──────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -54,7 +58,11 @@ class MainActivity : AppCompatActivity() {
         observeLog()
         observeData()
 
-        appendLog("SYS", "Ultra2 Companion listo · FitPro/Jieli protocol")
+        // Pre-fill MAC of the watch
+        binding.hexInput.setText("27:E2:F7:00:08:ED")
+        appendLog("SYS", "Ultra2 Companion v1.0 · LS7076 / Jieli")
+        appendLog("SYS", "Pulsa CONECTAR con el reloj en MODO INTELIGENTE")
+        appendLog("SYS", "O usa CONECTAR POR MAC si el scan no lo encuentra")
     }
 
     override fun onDestroy() {
@@ -62,11 +70,14 @@ class MainActivity : AppCompatActivity() {
         ble.dispose()
     }
 
-    // ── Button setup ───────────────────────────────────────────────────────
     private fun setupButtons() {
         binding.btnConnect.setOnClickListener {
-            if (!hasPermissions()) permLauncher.launch(permissions)
-            else ble.startScan()
+            if (!hasPermissions()) {
+                appendLog("SYS", "Solicitando permisos Bluetooth...")
+                permLauncher.launch(permissions)
+            } else {
+                ble.startScan()
+            }
         }
 
         binding.btnDisconnect.setOnClickListener { ble.disconnect() }
@@ -82,17 +93,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnHeartRate.setOnClickListener {
-            appendLog("CMD", "Midiendo frecuencia cardiaca...")
+            appendLog("CMD", "Midiendo HR...")
             ble.startHeartRate()
         }
 
         binding.btnEcgStart.setOnClickListener {
-            appendLog("CMD", "Iniciando ECG...")
+            appendLog("CMD", "ECG inicio...")
             ble.startECG()
         }
 
         binding.btnEcgStop.setOnClickListener {
-            appendLog("CMD", "Deteniendo ECG")
+            appendLog("CMD", "ECG stop")
             ble.stopECG()
         }
 
@@ -102,18 +113,26 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnContinuousHr.setOnClickListener {
-            appendLog("CMD", "Activando HR continua (30s)")
+            appendLog("CMD", "HR continua activada (30s)")
             ble.enableContinuousHR()
         }
 
+        // btnSendHex repurposed: connect by MAC or send hex
         binding.btnSendHex.setOnClickListener {
-            val hex     = binding.hexInput.text.toString()
-            val channel = when (binding.channelSpinner.selectedItemPosition) {
-                0    -> FitProProtocol.CHANNEL_FFFF
-                1    -> FitProProtocol.CHANNEL_NUS
-                else -> "3802"
+            val input = binding.hexInput.text.toString().trim()
+            if (input.matches(Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}"))) {
+                // It's a MAC address
+                appendLog("CMD", "Conectando por MAC: $input")
+                ble.connectByMac(input)
+            } else {
+                // It's hex data to send
+                val channel = when (binding.channelSpinner.selectedItemPosition) {
+                    0    -> FitProProtocol.CHANNEL_FFFF
+                    1    -> FitProProtocol.CHANNEL_NUS
+                    else -> "3802"
+                }
+                ble.sendRawHex(channel, input)
             }
-            ble.sendRawHex(channel, hex)
         }
 
         binding.btnClearLog.setOnClickListener {
@@ -121,7 +140,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ── Observers ──────────────────────────────────────────────────────────
     private fun observeState() {
         lifecycleScope.launch {
             ble.state.collectLatest { state ->
@@ -132,15 +150,17 @@ class MainActivity : AppCompatActivity() {
                         binding.deviceName.text = ""
                         setCommandsEnabled(false)
                         binding.btnConnect.isEnabled = true
+                        binding.btnSendHex.isEnabled = true  // allow MAC connect always
                     }
                     is BleState.Scanning -> {
                         binding.statusDot.setBackgroundResource(R.drawable.dot_scanning)
-                        binding.statusText.text = "Buscando ULTRA2..."
+                        binding.statusText.text = "Escaneando BLE..."
                         binding.btnConnect.isEnabled = false
                     }
                     is BleState.Connecting -> {
                         binding.statusDot.setBackgroundResource(R.drawable.dot_scanning)
                         binding.statusText.text = "Conectando..."
+                        binding.btnConnect.isEnabled = false
                     }
                     is BleState.Connected -> {
                         binding.statusDot.setBackgroundResource(R.drawable.dot_connected)
@@ -157,13 +177,12 @@ class MainActivity : AppCompatActivity() {
     private fun observeLog() {
         lifecycleScope.launch {
             ble.log.collect { entry ->
-                val (tag, msg, color) = when (entry) {
-                    is LogEntry.Event -> Triple("EV", entry.msg, "#3b9eff")
-                    is LogEntry.Error -> Triple("ER", entry.msg, "#ff4d6a")
-                    is LogEntry.Tx    -> Triple("TX", "${entry.label} [${entry.bytes.toHex()}]", "#3b9eff")
-                    is LogEntry.Rx    -> Triple("RX", "${entry.label} [${entry.bytes.toHex()}]", "#00e87a")
+                when (entry) {
+                    is LogEntry.Event -> appendLog("EV", entry.msg)
+                    is LogEntry.Error -> appendLog("ER", entry.msg)
+                    is LogEntry.Tx    -> appendLog("TX", "${entry.label} [${entry.bytes.toHex()}]")
+                    is LogEntry.Rx    -> appendLog("RX", "${entry.label} [${entry.bytes.toHex()}]")
                 }
-                appendLog(tag, msg, color)
             }
         }
     }
@@ -173,36 +192,32 @@ class MainActivity : AppCompatActivity() {
             ble.data.collect { data ->
                 when (data) {
                     is WatchData.Health -> {
-                        binding.valueHr.text      = if (data.heartRate > 0) "${data.heartRate} bpm" else "—"
-                        binding.valueSteps.text   = if (data.steps > 0) "${data.steps}" else "—"
-                        binding.valueBattery.text = if (data.battery > 0) "${data.battery}%" else "—"
+                        if (data.heartRate > 0) binding.valueHr.text = "${data.heartRate} bpm"
+                        if (data.steps > 0)     binding.valueSteps.text = "${data.steps}"
+                        if (data.battery > 0)   binding.valueBattery.text = "${data.battery}%"
                     }
-                    is WatchData.Raw -> { /* logged separately */ }
+                    is WatchData.Raw -> {}
                 }
             }
         }
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────
     private fun setCommandsEnabled(enabled: Boolean) {
         listOf(
             binding.btnDisconnect, binding.btnPhoneType, binding.btnSyncTime,
             binding.btnHeartRate, binding.btnEcgStart, binding.btnEcgStop,
-            binding.btnSpo2, binding.btnContinuousHr, binding.btnSendHex
+            binding.btnSpo2, binding.btnContinuousHr
         ).forEach { it.isEnabled = enabled }
+        binding.btnSendHex.isEnabled = true // always enabled
     }
 
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
-    private fun appendLog(tag: String, msg: String, color: String = "#c9d6e3") {
+    private fun appendLog(tag: String, msg: String) {
         runOnUiThread {
             val time = timeFmt.format(Date())
-            val current = binding.logView.text.toString()
-            val line = "$time $tag $msg\n"
-            binding.logView.text = current + line
-            binding.logScroll.post {
-                binding.logScroll.fullScroll(View.FOCUS_DOWN)
-            }
+            binding.logView.append("$time $tag $msg\n")
+            binding.logScroll.post { binding.logScroll.fullScroll(View.FOCUS_DOWN) }
         }
     }
 
@@ -210,6 +225,5 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun ByteArray.toHex(): String =
-        joinToString(" ") { "%02X".format(it) }
+    private fun ByteArray.toHex() = joinToString(" ") { "%02X".format(it) }
 }

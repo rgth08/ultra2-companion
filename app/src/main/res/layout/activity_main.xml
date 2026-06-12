@@ -102,12 +102,12 @@
             <Spinner android:id="@+id/channelSpinner" android:layout_width="110dp" android:layout_height="44dp"
                 android:entries="@array/channels" android:background="@drawable/panel_bg" android:layout_marginEnd="8dp"/>
             <EditText android:id="@+id/hexInput" android:layout_width="0dp" android:layout_height="44dp"
-                android:layout_weight="1" android:hint="EE 00 08 01" android:textColor="#00e87a"
-                android:textColorHint="#4a5568" android:background="@drawable/panel_bg"
+                android:layout_weight="1" android:hint="27:E2:F7:00:08:ED o hex" android:textColor="#00e87a"
+                android:hintTextColor="#4a5568" android:background="@drawable/panel_bg"
                 android:fontFamily="monospace" android:textSize="13sp" android:inputType="text"
                 android:paddingHorizontal="10dp" android:layout_marginEnd="8dp"/>
             <Button android:id="@+id/btnSendHex" android:layout_width="70dp" android:layout_height="44dp"
-                android:enabled="false" android:text="Enviar" android:textColor="#3b9eff"
+                android:enabled="false" android:text="Conectar/Enviar" android:textColor="#3b9eff"
                 android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="12sp"/>
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
