@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="channels">
+        <item>0xFF22</item>
+        <item>NUS</item>
+        <item>0x4A02</item>
+    </string-array>
+</resources>

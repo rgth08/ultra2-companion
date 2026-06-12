@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0a0e14" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="14dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="⌚" android:textSize="28sp" android:paddingEnd="10dp"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="ULTRA2 COMPANION" android:textColor="#00e87a"
+                    android:textSize="15sp" android:fontFamily="monospace"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="FitPro · Jieli JL · LS7076" android:textColor="#4a5568"
+                    android:textSize="11sp" android:fontFamily="monospace"/>
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="44dp"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:background="@drawable/panel_bg" android:paddingHorizontal="12dp"
+            android:layout_marginBottom="12dp">
+            <View android:id="@+id/statusDot" android:layout_width="8dp" android:layout_height="8dp"
+                android:background="@drawable/dot_disconnected" android:layout_marginEnd="10dp"/>
+            <TextView android:id="@+id/statusText" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="Desconectado" android:textColor="#c9d6e3"
+                android:textSize="13sp" android:fontFamily="monospace"/>
+            <TextView android:id="@+id/deviceName" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="#00e87a"
+                android:textSize="11sp" android:fontFamily="monospace"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="12dp" android:weightSum="3">
+            <LinearLayout android:layout_width="0dp" android:layout_height="72dp"
+                android:layout_weight="1" android:layout_marginEnd="6dp"
+                android:background="@drawable/panel_bg" android:gravity="center" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="❤" android:textSize="18sp"/>
+                <TextView android:id="@+id/valueHr" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="—" android:textColor="#ff4d6a" android:textSize="14sp" android:fontFamily="monospace" android:textStyle="bold"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="72dp"
+                android:layout_weight="1" android:layout_marginEnd="6dp"
+                android:background="@drawable/panel_bg" android:gravity="center" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="👟" android:textSize="18sp"/>
+                <TextView android:id="@+id/valueSteps" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="—" android:textColor="#3b9eff" android:textSize="14sp" android:fontFamily="monospace" android:textStyle="bold"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="72dp"
+                android:layout_weight="1" android:background="@drawable/panel_bg" android:gravity="center" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔋" android:textSize="18sp"/>
+                <TextView android:id="@+id/valueBattery" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="—" android:textColor="#00e87a" android:textSize="14sp" android:fontFamily="monospace" android:textStyle="bold"/>
+            </LinearLayout>
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="CONEXIÓN" android:textColor="#4a5568" android:textSize="10sp"
+            android:fontFamily="monospace" android:letterSpacing="0.15" android:layout_marginBottom="8dp"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <Button android:id="@+id/btnConnect" android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginEnd="8dp" android:text="🔵 Conectar"
+                android:textColor="#000000" android:backgroundTint="#00e87a" android:fontFamily="monospace" android:textSize="12sp"/>
+            <Button android:id="@+id/btnDisconnect" android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:text="✕ Desconectar" android:textColor="#ff4d6a"
+                android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="12sp" android:enabled="false"/>
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="COMANDOS" android:textColor="#4a5568" android:textSize="10sp"
+            android:fontFamily="monospace" android:letterSpacing="0.15" android:layout_marginBottom="8dp"/>
+        <GridLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:columnCount="2" android:useDefaultMargins="true" android:layout_marginBottom="12dp">
+            <Button android:id="@+id/btnPhoneType" android:layout_width="0dp" android:layout_columnWeight="1"
+                android:layout_height="44dp" android:enabled="false" android:text="📱 PhoneType Android"
+                android:textColor="#ff8c42" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+            <Button android:id="@+id/btnSyncTime" android:layout_width="0dp" android:layout_columnWeight="1"
+                android:layout_height="44dp" android:enabled="false" android:text="🕐 Sync hora"
+                android:textColor="#3b9eff" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+            <Button android:id="@+id/btnHeartRate" android:layout_width="0dp" android:layout_columnWeight="1"
+                android:layout_height="44dp" android:enabled="false" android:text="❤ Frecuencia cardiaca"
+                android:textColor="#ff4d6a" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+            <Button android:id="@+id/btnSpo2" android:layout_width="0dp" android:layout_columnWeight="1"
+                android:layout_height="44dp" android:enabled="false" android:text="💉 SpO2"
+                android:textColor="#c9d6e3" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+            <Button android:id="@+id/btnEcgStart" android:layout_width="0dp" android:layout_columnWeight="1"
+                android:layout_height="44dp" android:enabled="false" android:text="📈 ECG inicio"
+                android:textColor="#ffe066" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+            <Button android:id="@+id/btnEcgStop" android:layout_width="0dp" android:layout_columnWeight="1"
+                android:layout_height="44dp" android:enabled="false" android:text="⏹ ECG stop"
+                android:textColor="#4a5568" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+            <Button android:id="@+id/btnContinuousHr" android:layout_width="0dp" android:layout_columnWeight="2"
+                android:layout_height="44dp" android:enabled="false" android:text="🔄 HR continua (cada 30s)"
+                android:textColor="#00e87a" android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="11sp"/>
+        </GridLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="ENVÍO MANUAL HEX" android:textColor="#4a5568" android:textSize="10sp"
+            android:fontFamily="monospace" android:letterSpacing="0.15" android:layout_marginBottom="8dp"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <Spinner android:id="@+id/channelSpinner" android:layout_width="110dp" android:layout_height="44dp"
+                android:entries="@array/channels" android:background="@drawable/panel_bg" android:layout_marginEnd="8dp"/>
+            <EditText android:id="@+id/hexInput" android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:hint="EE 00 08 01" android:textColor="#00e87a"
+                android:hintTextColor="#4a5568" android:background="@drawable/panel_bg"
+                android:fontFamily="monospace" android:textSize="13sp" android:inputType="text"
+                android:paddingHorizontal="10dp" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btnSendHex" android:layout_width="70dp" android:layout_height="44dp"
+                android:enabled="false" android:text="Enviar" android:textColor="#3b9eff"
+                android:backgroundTint="#111720" android:fontFamily="monospace" android:textSize="12sp"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="TRÁFICO BLE" android:textColor="#4a5568" android:textSize="10sp"
+                android:fontFamily="monospace" android:letterSpacing="0.15"/>
+            <Button android:id="@+id/btnClearLog" android:layout_width="wrap_content" android:layout_height="28dp"
+                android:text="limpiar" android:textColor="#4a5568" android:backgroundTint="#111720"
+                android:fontFamily="monospace" android:textSize="11sp" android:paddingHorizontal="10dp"/>
+        </LinearLayout>
+        <ScrollView android:id="@+id/logScroll" android:layout_width="match_parent"
+            android:layout_height="240dp" android:background="@drawable/panel_bg">
+            <TextView android:id="@+id/logView" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:padding="10dp" android:textColor="#c9d6e3"
+                android:textSize="10sp" android:fontFamily="monospace" android:lineSpacingMultiplier="1.5"/>
+        </ScrollView>
+    </LinearLayout>
+</ScrollView>
